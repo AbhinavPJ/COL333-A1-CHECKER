@@ -240,14 +240,6 @@ def generate_suite(base=None, count=1000, seed=20260824):
     model_dir.mkdir(parents=True)
     randomizer = random.Random(seed)
     valid_count = count * 7 // 10
-    manifest = {
-        'version': 4,
-        'count': count,
-        'valid_count': valid_count,
-        'seed': seed,
-        'expected': {}
-    }
-
     for index in range(count):
         if index < valid_count:
             spec = valid_spec(index, randomizer)
@@ -257,12 +249,8 @@ def generate_suite(base=None, count=1000, seed=20260824):
             spec = invalid_spec(index - valid_count, randomizer)
             roster = None
         spec['name'] = f'test{index + 1}'
-        manifest['expected'][spec['name']] = 'valid' if roster is not None else 'empty'
         write_case(suite, model_dir, spec, roster, randomizer)
 
-    (model_dir / 'manifest.json').write_text(
-        json.dumps(manifest), encoding='utf-8'
-    )
     return suite
 
 

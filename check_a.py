@@ -5,7 +5,6 @@ import json
 import subprocess
 import sys
 import uuid
-from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,22 +24,12 @@ def suites():
     return sorted(path for path in test_root.iterdir() if path.is_dir() and any(path.glob('*.csv')))
 
 
-@lru_cache
-def suite_expectations(suite_name):
-    manifest_path = CHECKER / 'model-solutions' / suite_name / 'manifest.json'
-    try:
-        return read_json(manifest_path).get('expected', {})
-    except (OSError, json.JSONDecodeError, AttributeError):
-        return {}
-
-
 def expected_type(input_path):
-    expected = suite_expectations(input_path.parent.name).get(input_path.stem)
-    if expected in {'valid', 'empty'}:
-        return expected
-    if input_path.stem.startswith('invalid_'):
-        return 'empty'
-    return 'valid'
+    model_path = CHECKER / 'model-solutions' / input_path.parent.name / f'{input_path.stem}.json'
+    try:
+        return 'empty' if read_json(model_path) == {} else 'valid'
+    except (OSError, json.JSONDecodeError):
+        return 'valid'
 
 
 def verify_solution(verifier, instance, solution):

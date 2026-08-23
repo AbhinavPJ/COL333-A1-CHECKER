@@ -1,28 +1,25 @@
 # Part A checker
 
-Run from the repository root. No additional packages are required.
+## Evaluate
 
-Add a new suite of 1,000 mixed test cases:
-
-```bash
-python checker/test_generator.py
-```
-
-Run `part_a.py` on every suite and replace the model solutions with its output:
+Clone this repository into the root of your project, alongside `part_a.py`:
 
 ```bash
-python checker/check_a.py overwrite
+git clone https://github.com/AbhinavPJ/COL333-A1-CHECKER.git checker
 ```
 
-Run `part_a.py` again and verify each output:
+From the project root, run:
 
 ```bash
 python checker/check_a.py evaluate
 ```
 
-Test cases are written under `checker/test-cases/`. Model solutions are written under
-`checker/model-solutions/`, and candidate solutions under `checker/solutions/`.
+The checker runs `part_a.py` on every test case and reports the number of correct solutions. No additional packages are required.
 
-Evaluation uses `verifier.py` for H1-H9 validation. Expected infeasible cases are tracked in
-the suite manifest and must produce `{}`. Candidate solutions are stored under
-`checker/solutions/`.
+## Contributing
+
+Contributions to the checker are welcome. You can:
+
+- Add test cases under `test-cases/<suite>/`.
+- Add or update the corresponding model solutions under `model-solutions/<suite>/`.
+- Add new suites, generators, verifier improvements, or other checker fixes.
