@@ -2,7 +2,7 @@
 
 ## Evaluate
 
-Clone this repository into the root of your project, alongside `part_a.py`:
+Clone this repository into the root of your project.
 
 ```bash
 git clone https://github.com/AbhinavPJ/COL333-A1-CHECKER.git checker
@@ -23,3 +23,4 @@ Contributions to the checker are welcome. You can:
 - Add test cases under `test-cases/<suite>/`.
 - Add or update the corresponding model solutions under `model-solutions/<suite>/`.
 - Add new suites, generators, verifier improvements, or other checker fixes.
+- Create a pull request with your changes.
