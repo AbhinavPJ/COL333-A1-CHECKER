@@ -4,6 +4,7 @@ import io
 import json
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -85,15 +86,19 @@ def solve_to_temp(input_path, directory, timeout=None):
 def overwrite_models():
     import verifier
 
+    started_at = time.time()
     updated = 0
     failures = 0
+    attempted = 0
     for suite in suites():
         model_dir = CHECKER / 'model-solutions' / suite.name
         for input_path in sorted(suite.glob('*.csv')):
+            attempted += 1
             result, error = solve_to_temp(input_path, model_dir, timeout=60)
             if error:
                 failures += 1
                 print(f'FAIL {suite.name}/{input_path.name}: {error}')
+                print(f'Progress: {updated} out of {attempted} correct so far in {time.time() - started_at:.2f} seconds', flush=True)
                 continue
             temporary_path, solution = result
             instance = verifier.read_input(str(input_path))
@@ -101,9 +106,11 @@ def overwrite_models():
                 temporary_path.unlink(missing_ok=True)
                 failures += 1
                 print(f'FAIL {suite.name}/{input_path.name}: solver output is not correct')
+                print(f'Progress: {updated} out of {attempted} correct so far in {time.time() - started_at:.2f} seconds', flush=True)
                 continue
             temporary_path.replace(model_dir / f'{input_path.stem}.json')
             updated += 1
+            print(f'Progress: {updated} out of {attempted} correct so far in {time.time() - started_at:.2f} seconds', flush=True)
         print(f'{suite.name}: overwritten')
     print(f'Model solutions updated: {updated}; failures: {failures}')
     return failures == 0
@@ -111,18 +118,20 @@ def overwrite_models():
 
 def evaluate():
     import verifier
+    started_at = time.time()
     correct = 0
-    total = 0
+    attempted = 0
     for suite in suites():
         suite_correct = 0
         suite_total = 0
         solution_dir = CHECKER / 'solutions' / suite.name
         for input_path in sorted(suite.glob('*.csv')):
             suite_total += 1
-            total += 1
+            attempted += 1
             result, error = solve_to_temp(input_path, solution_dir)
             if error:
                 print(f'FAIL {suite.name}/{input_path.name}: {error}')
+                print(f'Progress: {correct} out of {attempted} correct so far in {time.time() - started_at:.2f} seconds', flush=True)
                 continue
             temporary_path, candidate = result
             temporary_path.replace(solution_dir / f'{input_path.stem}.json')
@@ -133,9 +142,10 @@ def evaluate():
                 suite_correct += 1
             else:
                 print(f'FAIL {suite.name}/{input_path.name}: incorrect solver output')
+            print(f'Progress: {correct} out of {attempted} correct so far in {time.time() - started_at:.2f} seconds', flush=True)
         print(f'{suite.name}: correct {suite_correct}/{suite_total}')
-    print(f'Correct: {correct}/{total}')
-    return correct == total
+    print(f'Correct: {correct}/{attempted}')
+    return correct == attempted
 
 def main():
     if len(sys.argv) != 2 or sys.argv[1] not in {'overwrite', 'evaluate'}:
