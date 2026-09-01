@@ -171,14 +171,17 @@ def main():
                     target = MODEL_SOLUTIONS / folder_name / f"{case.stem}.json"
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(output, target)
-                result = compare(status, objective, output, model_result(folder_name, case, part))
+                reference = model_result(folder_name, case, part)
+                result = compare(status, objective, output, reference)
                 rows.append((part.upper(), f"{folder_name}/{case.name}", result, objective, elapsed))
                 if detail:
                     details.append((part, case.name, detail))
                 if arguments.keep_outputs and output.is_file():
                     arguments.keep_outputs.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(output, arguments.keep_outputs / output.name)
-                print(f"{part.upper()} {folder_name}/{case.name}: {result} objective={objective} seconds={elapsed:.4f}", flush=True)
+                model_objective = reference[1] if result in {"MATCHED", "MORE_OPTIMAL", "SUBOPTIMAL"} else None
+                model_detail = f" model_objective={model_objective}" if model_objective is not None else ""
+                print(f"{part.upper()} {folder_name}/{case.name}: {result} objective={objective}{model_detail} seconds={elapsed:.4f}", flush=True)
                 if arguments.fail_fast and result == "FAIL":
                     break
             if arguments.fail_fast and rows[-1][2] == "FAIL":
