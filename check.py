@@ -108,7 +108,7 @@ def compare(status, objective, output, reference):
     if reference is None or reference[0] == "UNKNOWN":
         return "PASS" if status == "PASS" else "FAIL"
     if reference[0] == "INFEASIBLE":
-        return "NO_SOLUTION" if status == "INVALID" and is_empty_solution(output) else "FAIL"
+        return "PASS" if status == "INVALID" and is_empty_solution(output) else "FAIL"
     if status != "PASS":
         return "FAIL"
     if reference[1] is None:
@@ -185,6 +185,15 @@ def main():
                 break
     passed = sum(row[2] != "FAIL" for row in rows)
     print(f"Summary: {passed}/{len(rows)} runs passed")
+    counts = {status: sum(row[2] == status for row in rows)
+              for status in ("MATCHED", "MORE_OPTIMAL", "SUBOPTIMAL", "PASS", "FAIL")}
+    print("Verdicts: "
+          f"MATCHED={counts['MATCHED']} "
+          f"MORE OPTIMAL={counts['MORE_OPTIMAL']} "
+          f"SUBOPTIMAL={counts['SUBOPTIMAL']} "
+          f"PASS={counts['PASS']} "
+          f"FAIL={counts['FAIL']}")
+    print(f"Total time: {sum(row[4] for row in rows):.4f} seconds")
     for part, case, detail in details:
         print(f"[{part} {case}] {detail}", file=sys.stderr)
     return 0 if passed == len(rows) else 1
