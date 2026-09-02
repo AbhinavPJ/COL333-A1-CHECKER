@@ -10,6 +10,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import verifier
+
 REPOSITORY = Path(__file__).resolve().parents[1]
 CHECKER = Path(__file__).resolve().parent
 TEST_CASES = CHECKER / "test-cases"
@@ -29,6 +31,7 @@ def parser():
         "-t", "--tests", action="append",
         help="test-folder alias/path; repeat or comma-separate values (default: all)")
     result.add_argument("-p", "--part", choices=("a", "b", "both"), default="both")
+    result.add_argument("-j", "--jobs", type=int, default=1, help="number of parallel jobs")
     result.add_argument("--timeout", type=float, help="hard wall-clock limit per run")
     result.add_argument("--python", default=sys.executable)
     result.add_argument("--keep-outputs", type=Path)
@@ -44,27 +47,40 @@ def tokens(values):
     return [piece.strip() for value in values for piece in value.split(",") if piece.strip()]
 
 
-def resolve_test_folders(values):
-    selected = []
+def resolve_cases(values):
+    selected_cases = []
     for token in tokens(values):
         if token == "all":
-            selected.extend(TEST_ALIASES.values())
+            for folder in TEST_ALIASES.values():
+                selected_cases.extend(sorted(folder.glob("*.csv")))
         elif token in TEST_ALIASES:
-            selected.append(TEST_ALIASES[token])
+            selected_cases.extend(sorted(TEST_ALIASES[token].glob("*.csv")))
         else:
             supplied = Path(token).expanduser()
             candidates = [supplied] if supplied.is_absolute() else [Path.cwd() / supplied, TEST_CASES / supplied]
-            selected.extend(candidate for candidate in candidates if candidate.is_dir())
-            if not any(candidate.is_dir() for candidate in candidates):
-                raise ValueError(f"unknown test folder or alias: {token}")
+            
+            found = False
+            for candidate in candidates:
+                if candidate.is_dir():
+                    selected_cases.extend(sorted(candidate.glob("*.csv")))
+                    found = True
+                    break
+                elif candidate.is_file() and candidate.suffix == ".csv":
+                    selected_cases.append(candidate)
+                    found = True
+                    break
+            
+            if not found:
+                raise ValueError(f"unknown test folder, file, or alias: {token}")
+                
     seen = set()
     result = []
-    for path in selected:
+    for path in selected_cases:
         path = path.resolve()
         if path not in seen:
             seen.add(path)
             result.append(path)
-    return result
+    return [(case.parent.name, case) for case in result]
 
 
 def read_budget(csv_path):
@@ -143,7 +159,36 @@ def execute(python, part, case, timeout, temporary):
     return ("PASS" if valid else "INVALID"), objective, elapsed, output, detail
 
 
+def _run_task_wrapper(args):
+    python_cmd, overwrite, keep_outputs, part, folder_name, case, timeout, temp_dir = args
+    status, objective, elapsed, output, detail = execute(python_cmd, part, case, timeout, temp_dir)
+    
+    if overwrite and output.is_file():
+        target = MODEL_SOLUTIONS / folder_name / f"{case.stem}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(output, target)
+        
+    reference = model_result(folder_name, case, part)
+    result = compare(status, objective, output, reference)
+    
+    if keep_outputs and output.is_file():
+        keep_outputs.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(output, keep_outputs / output.name)
+        
+    model_objective = reference[1] if result in {"MATCHED", "MORE_OPTIMAL", "SUBOPTIMAL"} else None
+    return part, folder_name, case, result, objective, elapsed, detail, model_objective
+
+
 def main():
+    import signal
+    import os
+    
+    def signal_handler(sig, frame):
+        print("\nCheck interrupted by user. Shutting down instantly...", flush=True)
+        os._exit(130)
+        
+    signal.signal(signal.SIGINT, signal_handler)
+
     arguments = parser().parse_args()
     if arguments.list:
         for name, path in TEST_ALIASES.items():
@@ -152,40 +197,44 @@ def main():
     if arguments.timeout is not None and arguments.timeout <= 0:
         parser().error("--timeout must be positive")
     try:
-        folders = resolve_test_folders(arguments.tests)
+        cases = resolve_cases(arguments.tests)
     except ValueError as error:
         parser().error(str(error))
-    cases = [(folder.name, case) for folder in folders for case in sorted(folder.glob("*.csv"))]
     if not cases:
         parser().error("no CSV test cases found in the selected folder(s)")
     parts = ("a", "b") if arguments.part == "both" else (arguments.part,)
     rows = []
     details = []
+    import concurrent.futures
+    
     with tempfile.TemporaryDirectory(prefix="col333-check-") as temporary_name:
         temporary = Path(temporary_name)
+        
+        tasks = []
         for folder_name, case in cases:
             for part in parts:
                 timeout = arguments.timeout if arguments.timeout is not None else max(0.05, read_budget(case) + 2.0)
-                status, objective, elapsed, output, detail = execute(arguments.python, part, case, timeout, temporary)
-                if arguments.overwrite_models and output.is_file():
-                    target = MODEL_SOLUTIONS / folder_name / f"{case.stem}.json"
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(output, target)
-                reference = model_result(folder_name, case, part)
-                result = compare(status, objective, output, reference)
-                rows.append((part.upper(), f"{folder_name}/{case.name}", result, objective, elapsed))
-                if detail:
-                    details.append((part, case.name, detail))
-                if arguments.keep_outputs and output.is_file():
-                    arguments.keep_outputs.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(output, arguments.keep_outputs / output.name)
-                model_objective = reference[1] if result in {"MATCHED", "MORE_OPTIMAL", "SUBOPTIMAL"} else None
-                model_detail = f" model_objective={model_objective}" if model_objective is not None else ""
-                print(f"{part.upper()} {folder_name}/{case.name}: {result} objective={objective}{model_detail} seconds={elapsed:.4f}", flush=True)
-                if arguments.fail_fast and result == "FAIL":
-                    break
-            if arguments.fail_fast and rows[-1][2] == "FAIL":
-                break
+                tasks.append((arguments.python, arguments.overwrite_models, arguments.keep_outputs, part, folder_name, case, timeout, temporary))
+                
+        try:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=arguments.jobs) as executor:
+                future_to_task = {executor.submit(_run_task_wrapper, task): task for task in tasks}
+                for future in concurrent.futures.as_completed(future_to_task):
+                    part, folder_name, case, result, objective, elapsed, detail, model_objective = future.result()
+                    rows.append((part.upper(), f"{folder_name}/{case.name}", result, objective, elapsed))
+                    if detail:
+                        details.append((part, case.name, detail))
+                    model_detail = f" model_objective={model_objective}" if model_objective is not None else ""
+                    print(f"{part.upper()} {folder_name}/{case.name}: {result} objective={objective}{model_detail} seconds={elapsed:.4f}", flush=True)
+                    if arguments.fail_fast and result == "FAIL":
+                        for f in future_to_task:
+                            f.cancel()
+                        break
+        except KeyboardInterrupt:
+            print("\nCheck interrupted by user. Shutting down workers...")
+            import os
+            os._exit(130)
+
     passed = sum(row[2] != "FAIL" for row in rows)
     print(f"Summary: {passed}/{len(rows)} runs passed")
     counts = {status: sum(row[2] == status for row in rows)
@@ -203,5 +252,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import verifier
     raise SystemExit(main())
